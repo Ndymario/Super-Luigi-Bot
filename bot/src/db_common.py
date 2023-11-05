@@ -1,172 +1,130 @@
-from typing import Union
-from pydantic import BaseModel
+import math
 from datetime import datetime
 from pocketbase import PocketBase
 
 
-class Item(BaseModel):
-    id: Union[int, None] = None
-    name: Union[str, None] = None
-    cost: Union[int, None] = None
+class Item:
+    pass
 
 
-class Tag(BaseModel):
-    id: Union[int, None] = None
-    tag: Union[str, None] = None
-    title: Union[str, None] = None
-    description: Union[str, None] = None
-    url: Union[str, None] = None
+class User:
+    def __init__(self, user_id: int, username: str = None, stats: dict = None, birthday: datetime = None,
+                 items: [Item] = None, preferences: dict = None, pb_id: int = None):
+        self.user_id = user_id
+        self.username = username
+        self.stats = stats
+        self.birthday = birthday
+        self.items = items
+        self.preferences = preferences
+        self.pb_id = pb_id
+
+    @classmethod
+    def get_user(cls, user_id):
+        user = db.get_pb_user(user_id)
+
+        if user is None:
+            return cls(user_id, pb_id=user.id)
+
+        return cls(user_id, user.username, user.stats, user.birthday, user.items, user.preferences, int(user.id))
+
+    def save(self):
+        if db.get_pb_user(self.pb_id) is None:
+            db.client.collection("users").create({
+                "username": self.username,
+                "user_id": self.user_id,
+                "stats": self.stats,
+                "birthday": self.birthday,
+                "preferences": self.preferences,
+                "inventory": self.items
+            })
+            return
+
+        db.client.collection("users").update(str(self.pb_id), {
+            "username": self.username,
+            "user_id": self.user_id,
+            "stats": self.stats,
+            "birthday": self.birthday,
+            "preferences": self.preferences,
+            "inventory": self.items
+        })
+
+    def modify_exp(self, exp: int, guild_id: int):
+        exp = math.floor(exp)
+        if self.stats[guild_id][0] + exp < 0:
+            return False
+
+        self.stats[guild_id][0] += exp
+        # Lifetime EXP should not be affected by purchasing things
+        if exp > 0:
+            self.stats[guild_id][1] += exp
+
+        return True
 
 
-class FAQ(BaseModel):
-    id: Union[int, None] = None
-    question: Union[str, None] = None
-    title: Union[str, None] = None
-    description: Union[str, None] = None
-    url: Union[str, None] = None
+class Server:
+    def __init__(self, server_id: int, name: str = None, members: [User] = None, items: [Item] = None,
+                 tags: dict = None, levels: dict = None, multiplier: int = None, pb_id: int = None):
+        self.server_id = server_id
+        self.name = name
+        self.members = members
+        self.items = items
+        self.tags = tags
+        self.levels = levels
+        self.multiplier = multiplier
+        self.pb_id = pb_id
 
+    @classmethod
+    def get_user(cls, server_id):
+        server = db.get_pb_server(server_id)
 
-class User(BaseModel):
-    id: Union[int, None] = None
-    name: Union[str, None] = None
-    exp: Union[int, None] = None
-    total_exp: Union[int, None] = None
-    level: Union[int, None] = None
-    birthday: Union[datetime, None] = None
-    inventory: Union[list, None] = None
-    preferences: Union[dict, None] = None
+        if server is None:
+            return cls(server_id, pb_id=server.id)
 
+        return cls(server_id, server.name, server.members, server.items, server.tags, server.levels, server.multiplier,
+                   int(server.id))
 
-class Server(BaseModel):
-    id:Union[int, None] = None
-    name: Union[str, None] = None
-    members: Union[list, None] = None
-    items: Union[list, None] = None
-    faqs: Union[list, None] = None
-    tags: Union[list, None] = None
-    levels: Union[dict, None] = None
+    def save(self):
+        if db.get_pb_server(self.pb_id) is None:
+            db.client.collection("servers").create({
+                "name": self.name,
+                "server_id": self.server_id,
+                "items": self.items,
+                "tags": self.tags,
+                "levels": self.levels,
+                "members": self.members,
+                "multiplier": self.multiplier
+            })
+            return
+
+        db.client.collection("servers").update(str(self.pb_id), {
+                "name": self.name,
+                "server_id": self.server_id,
+                "items": self.items,
+                "tags": self.tags,
+                "levels": self.levels,
+                "members": self.members,
+                "multiplier": self.multiplier
+            })
 
 
 class Database:
     def __init__(self):
         self.client = PocketBase("http://pocketbase:8090")
 
-    def _get_pb_server(self, server_id: int):
+    def get_pb_server(self, server_id: int):
         try:
             record = self.client.collection("servers").get_list(1, 1, {"filter": f"server_id = {server_id}"}).items[0]
         except IndexError:
             return None
         return record
 
-    def _get_pb_user(self, user_id: int):
+    def get_pb_user(self, user_id: int):
         try:
-            record = self.client.collection("users").get_list(1, 1, {"filter": f"user_id = {user_id}"}).items[0]
+            record = self.client.collection("users").get_list(1, 1, {
+                "filter": f"user_id = {user_id}"}).items[0]
         except IndexError:
             return None
         return record
 
-    def get_server(self, server_id: int) -> Server:
-        record = self._get_pb_server(server_id)
-        if record is None:
-            return None
-
-        server = Server()
-        server.name = record.name
-        server.id = record.server_id
-        server.items = record.items
-        server.faqs = record.faqs
-        server.tags = record.tags
-        server.levels = record.levels
-        server.members = record.members
-
-        return server
-
-    def add_server(self, server: Server):
-        self.client.collection("servers").create({
-            "name": server.name,
-            "server_id": server.id,
-            "items": server.items,
-            "faqs": server.faqs,
-            "tags": server.tags,
-            "levels": server.levels,
-            "members": server.members
-        })
-
-    def add_member(self, user_id: int, server_id: int):
-        user = self._get_pb_user(user_id)
-        server = self._get_pb_server(server_id)
-        if user is None:
-            return
-        if server is None:
-            return
-
-        members = server.members
-        members.append(user.id)
-        self.client.collection("servers").update(server.id, {"members": members})
-
-    def get_user(self, user_id: int) -> User:
-        record = self._get_pb_user(user_id)
-        if record is None:
-            return None
-
-        user = User()
-        user.id = record.user_id
-        user.name = record.username
-        user.exp = record.exp
-        user.total_exp = record.total_exp
-        user.level = record.level
-        user.birthday = record.birthday
-        user.inventory = record.inventory
-        user.preferences = record.preferences
-
-        return user
-
-    def add_user(self, user: User, guild_id: int):
-        self.client.collection("users").create({
-            "username": user.name,
-            "user_id": user.id,
-            "exp": user.exp,
-            "total_exp": user.total_exp,
-            "level": user.level,
-            "birthday": user.birthday,
-            "preferences": user.preferences,
-            "inventory": user.inventory
-        })
-        self.add_member(user.id, guild_id)
-
-    def get_item(self, user_id: int) -> User:
-        record = self._get_pb_user(user_id)
-        if record is None:
-            return None
-
-        user = User()
-        user.id = record.user_id
-        user.name = record.username
-        user.exp = record.exp
-        user.total_exp = record.total_exp
-        user.level = record.level
-        user.birthday = record.birthday
-        user.inventory = record.inventory
-        user.preferences = record.preferences
-
-        return user
-
-    def add_item(self, user: User, guild_id: int):
-        self.client.collection("users").create({
-            "username": user.name,
-            "user_id": user.id,
-            "exp": user.exp,
-            "total_exp": user.total_exp,
-            "level": user.level,
-            "birthday": user.birthday,
-            "preferences": user.preferences,
-            "inventory": user.inventory
-        })
-        self.add_member(user.id, guild_id)
-
 
 db = Database()
-
-if __name__ == "__main__":
-    # TODO: Write script to restore user EXP
-    pass
